@@ -221,6 +221,7 @@ jobs:
             echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
             echo "KEYCLOAK_ADMIN=${{ secrets.KEYCLOAK_ADMIN || 'admin' }}" >> .env
             echo "KEYCLOAK_ADMIN_PASSWORD=${{ secrets.KEYCLOAK_ADMIN_PASSWORD || secrets.DB_PASSWORD }}" >> .env
+            echo "FRONTEND_PORT=${{ secrets.FRONTEND_PORT || '5173' }}" >> .env
 
             # Pull latest images from Amazon ECR and Docker Hub cleanly
             docker compose -f docker-compose.prod.yml pull

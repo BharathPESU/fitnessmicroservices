@@ -229,8 +229,7 @@ services:
     container_name: fitness-frontend
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "5173:80"
+      - "${FRONTEND_PORT:-5173}:80"
     depends_on:
       - gateway
       - keycloak
