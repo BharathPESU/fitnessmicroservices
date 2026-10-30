@@ -1,9 +1,14 @@
 import axios from "axios";
 
-const API_URL = "http://localhost:8086/api";
+const hostname = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+const protocol = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+
+const API_BASE = (hostname === 'localhost' || hostname === '127.0.0.1')
+  ? "http://localhost:8086/api"
+  : `${protocol}//${hostname}:8086/api`;
 
 const api = axios.create({
-  baseURL: API_URL,
+  baseURL: API_BASE,
   headers: {
     "Content-Type": "application/json",
   },

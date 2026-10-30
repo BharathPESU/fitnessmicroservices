@@ -173,7 +173,7 @@ jobs:
           RAW_HOST: ${{ secrets.EC2_HOST }}
           RAW_USER: ${{ secrets.EC2_USER || 'ubuntu' }}
         run: |
-          TARGET_HOST=$(echo "$RAW_HOST" | tr -d '[:space:]"')
+          TARGET_HOST=$(echo "$RAW_HOST" | sed -e 's|^[^/]*//||' -e 's|/.*$||' | tr -d '[:space:]"')
           TARGET_USER=$(echo "$RAW_USER" | tr -d '[:space:]"')
 
           if [ -z "$TARGET_HOST" ]; then
@@ -194,7 +194,7 @@ jobs:
           RAW_USER: ${{ secrets.EC2_USER || 'ubuntu' }}
           ECR_REGISTRY: ${{ needs.build-and-push-ecr.outputs.ecr_registry }}
         run: |
-          TARGET_HOST=$(echo "$RAW_HOST" | tr -d '[:space:]"')
+          TARGET_HOST=$(echo "$RAW_HOST" | sed -e 's|^[^/]*//||' -e 's|/.*$||' | tr -d '[:space:]"')
           TARGET_USER=$(echo "$RAW_USER" | tr -d '[:space:]"')
           SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30"
 
