@@ -167,22 +167,41 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
       - name: Prepare EC2 App Directory & Sync Manifests
+        env:
+          RAW_HOST: ${{ secrets.EC2_HOST }}
+          RAW_USER: ${{ secrets.EC2_USER || 'ubuntu' }}
         run: |
-          ssh ${{ secrets.EC2_USER || 'ubuntu' }}@${{ secrets.EC2_HOST }} "mkdir -p ~/fitness-app/keycloak"
-          scp docker-compose.prod.yml ${{ secrets.EC2_USER || 'ubuntu' }}@${{ secrets.EC2_HOST }}:~/fitness-app/docker-compose.prod.yml
-          scp keycloak/realm-export.json ${{ secrets.EC2_USER || 'ubuntu' }}@${{ secrets.EC2_HOST }}:~/fitness-app/keycloak/realm-export.json
+          TARGET_HOST=$(echo "$RAW_HOST" | tr -d '[:space:]"')
+          TARGET_USER=$(echo "$RAW_USER" | tr -d '[:space:]"')
+
+          if [ -z "$TARGET_HOST" ]; then
+            echo "::error::EC2_HOST secret is empty or missing! Please check GitHub Settings -> Secrets and variables -> Actions -> Repository secrets."
+            exit 1
+          fi
+
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30"
+
+          echo "Connecting to $TARGET_USER@$TARGET_HOST ..."
+          ssh $SSH_OPTS $TARGET_USER@$TARGET_HOST "mkdir -p ~/fitness-app/keycloak"
+          scp $SSH_OPTS docker-compose.prod.yml $TARGET_USER@$TARGET_HOST:~/fitness-app/docker-compose.prod.yml
+          scp $SSH_OPTS keycloak/realm-export.json $TARGET_USER@$TARGET_HOST:~/fitness-app/keycloak/realm-export.json
 
       - name: Authenticate EC2 Docker with Amazon ECR & Launch Containers
         env:
+          RAW_HOST: ${{ secrets.EC2_HOST }}
+          RAW_USER: ${{ secrets.EC2_USER || 'ubuntu' }}
           ECR_REGISTRY: ${{ needs.build-and-push-ecr.outputs.ecr_registry }}
         run: |
+          TARGET_HOST=$(echo "$RAW_HOST" | tr -d '[:space:]"')
+          TARGET_USER=$(echo "$RAW_USER" | tr -d '[:space:]"')
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30"
+
           # Obtain temporary ECR docker login password from AWS in the runner
           ECR_PASSWORD=$(aws ecr get-login-password --region ${{ env.AWS_REGION }})
 
-          ssh ${{ secrets.EC2_USER || 'ubuntu' }}@${{ secrets.EC2_HOST }} << EOF
+          ssh $SSH_OPTS $TARGET_USER@$TARGET_HOST << EOF
             set -e
             cd ~/fitness-app
 
