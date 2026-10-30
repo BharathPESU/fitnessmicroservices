@@ -1,0 +1,213 @@
+name: Fitness CI/CD to AWS ECR and EC2
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-2' }}
+
+jobs:
+  # ============================================================================
+  # 1. BUILD JARS, REACT FRONTEND, BUILD DOCKER IMAGES & PUSH TO AMAZON ECR
+  # ============================================================================
+  build-and-push-ecr:
+    name: Build & Push to Amazon ECR
+    runs-on: ubuntu-latest
+
+    outputs:
+      ecr_registry: ${{ steps.login-ecr.outputs.registry }}
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: fitness-frontend/package-lock.json
+
+      # ------------------------------------------------------------------------
+      # Maven Package Backend Microservices
+      # ------------------------------------------------------------------------
+      - name: Package Config Server
+        run: |
+          chmod +x ./configserver/configserver/mvnw
+          ./configserver/configserver/mvnw -f ./configserver/configserver/pom.xml clean package -DskipTests
+
+      - name: Package Eureka Server
+        run: |
+          chmod +x ./eureka/eureka/mvnw
+          ./eureka/eureka/mvnw -f ./eureka/eureka/pom.xml clean package -DskipTests
+
+      - name: Package User Service
+        run: |
+          chmod +x ./userservice/userservice/mvnw
+          ./userservice/userservice/mvnw -f ./userservice/userservice/pom.xml clean package -DskipTests
+
+      - name: Package Activity Service
+        run: |
+          chmod +x ./activityservice/activityservice/mvnw
+          ./activityservice/activityservice/mvnw -f ./activityservice/activityservice/pom.xml clean package -DskipTests
+
+      - name: Package AI Service
+        run: |
+          chmod +x ./aiservice/aiservice/mvnw
+          ./aiservice/aiservice/mvnw -f ./aiservice/aiservice/pom.xml clean package -DskipTests
+
+      - name: Package API Gateway
+        run: |
+          chmod +x ./gateway/gateway/mvnw
+          ./gateway/gateway/mvnw -f ./gateway/gateway/pom.xml clean package -DskipTests
+
+      # ------------------------------------------------------------------------
+      # Build Frontend (Vite -> dist)
+      # ------------------------------------------------------------------------
+      - name: Build React Frontend
+        run: |
+          cd fitness-frontend
+          npm ci
+          npm run build
+
+      # ------------------------------------------------------------------------
+      # AWS Authentication & Amazon ECR Login
+      # ------------------------------------------------------------------------
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # ------------------------------------------------------------------------
+      # Ensure ECR Repositories Exist (Auto-Provision if missing)
+      # ------------------------------------------------------------------------
+      - name: Ensure ECR Repositories Exist
+        run: |
+          REPOS=("fitness-configserver" "fitness-eureka" "fitness-userservice" "fitness-activityservice" "fitness-aiservice" "fitness-gateway" "fitness-frontend")
+          for repo in "${REPOS[@]}"; do
+            aws ecr describe-repositories --repository-names "$repo" --region ${{ env.AWS_REGION }} 2>/dev/null || \
+            aws ecr create-repository --repository-name "$repo" --region ${{ env.AWS_REGION }}
+          done
+
+      # ------------------------------------------------------------------------
+      # Build, Tag & Push Docker Images to Amazon ECR
+      # ------------------------------------------------------------------------
+      - name: Build & Push Docker Images to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          echo "Target ECR Registry: $ECR_REGISTRY"
+
+          # 1. Config Server
+          docker build -t $ECR_REGISTRY/fitness-configserver:latest ./configserver/configserver
+          docker push $ECR_REGISTRY/fitness-configserver:latest
+
+          # 2. Eureka Server
+          docker build -t $ECR_REGISTRY/fitness-eureka:latest ./eureka/eureka
+          docker push $ECR_REGISTRY/fitness-eureka:latest
+
+          # 3. User Service
+          docker build -t $ECR_REGISTRY/fitness-userservice:latest ./userservice/userservice
+          docker push $ECR_REGISTRY/fitness-userservice:latest
+
+          # 4. Activity Service
+          docker build -t $ECR_REGISTRY/fitness-activityservice:latest ./activityservice/activityservice
+          docker push $ECR_REGISTRY/fitness-activityservice:latest
+
+          # 5. AI Service
+          docker build -t $ECR_REGISTRY/fitness-aiservice:latest ./aiservice/aiservice
+          docker push $ECR_REGISTRY/fitness-aiservice:latest
+
+          # 6. API Gateway
+          docker build -t $ECR_REGISTRY/fitness-gateway:latest ./gateway/gateway
+          docker push $ECR_REGISTRY/fitness-gateway:latest
+
+          # 7. React Frontend
+          docker build -t $ECR_REGISTRY/fitness-frontend:latest ./fitness-frontend
+          docker push $ECR_REGISTRY/fitness-frontend:latest
+
+  # ============================================================================
+  # 2. DEPLOY ALL SERVICES VIA DOCKER COMPOSE TO AWS EC2
+  # ============================================================================
+  deploy-to-ec2:
+    name: Deploy to AWS EC2
+    needs: build-and-push-ecr
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout Source Code (for compose files)
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up SSH Private Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Prepare EC2 App Directory & Sync Manifests
+        run: |
+          ssh ${{ secrets.EC2_USER || 'ubuntu' }}@${{ secrets.EC2_HOST }} "mkdir -p ~/fitness-app/keycloak"
+          scp docker-compose.prod.yml ${{ secrets.EC2_USER || 'ubuntu' }}@${{ secrets.EC2_HOST }}:~/fitness-app/docker-compose.prod.yml
+          scp keycloak/realm-export.json ${{ secrets.EC2_USER || 'ubuntu' }}@${{ secrets.EC2_HOST }}:~/fitness-app/keycloak/realm-export.json
+
+      - name: Authenticate EC2 Docker with Amazon ECR & Launch Containers
+        env:
+          ECR_REGISTRY: ${{ needs.build-and-push-ecr.outputs.ecr_registry }}
+        run: |
+          # Obtain temporary ECR docker login password from AWS in the runner
+          ECR_PASSWORD=$(aws ecr get-login-password --region ${{ env.AWS_REGION }})
+
+          ssh ${{ secrets.EC2_USER || 'ubuntu' }}@${{ secrets.EC2_HOST }} << EOF
+            set -e
+            cd ~/fitness-app
+
+            # 1. Log in EC2 Docker daemon to Amazon ECR
+            echo "$ECR_PASSWORD" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+            # 2. Write runtime environment variables
+            cat << ENVFILE > .env
+          REGISTRY_PREFIX=${ECR_REGISTRY}/
+          IMAGE_TAG=latest
+          GEMINI_KEY=${{ secrets.GEMINI_KEY }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD || 'rohith' }}
+          KEYCLOAK_ADMIN=admin
+          KEYCLOAK_ADMIN_PASSWORD=admin
+          ENVFILE
+
+            # 3. Pull latest images from Amazon ECR
+            docker compose -f docker-compose.prod.yml pull
+
+            # 4. Deploy and start all services
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+            # 5. Clean up old unused images
+            docker image prune -f
+
+            # 6. Verify container status
+            docker compose -f docker-compose.prod.yml ps
+          EOF

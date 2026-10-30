@@ -1,0 +1,29 @@
+spring:
+  data:
+    mongodb:
+      uri: ${MONGODB_URI}
+      database: activitydb
+
+  kafka:
+    bootstrap-servers: kafka.fitness.internal:9092
+
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+server:
+  port: 8083
+
+kafka:
+  topic:
+    name: activity-events
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+  endpoint:
+    health:
+      show-details: always

@@ -1,0 +1,20 @@
+spring:
+  cloud:
+    gateway:
+      server:
+        webflux:
+          routes:
+            - id: user-service
+              uri: http://user-service.fitness.internal:8084
+              predicates:
+                - Path=/api/v1/**
+
+            - id: activity-service
+              uri: http://activity-service.fitness.internal:8083
+              predicates:
+                - Path=/api/activities/**
+
+            - id: ai-service
+              uri: http://ai-service.fitness.internal:8087
+              predicates:
+                - Path=/api/recommendations/**

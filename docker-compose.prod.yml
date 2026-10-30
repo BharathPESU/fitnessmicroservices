@@ -1,0 +1,247 @@
+services:
+  # ============================================================================
+  # INFRASTRUCTURE SERVICES
+  # ============================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: fitness-postgres
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: fitnessapp
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-rohith}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fitnessapp"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fitness-net
+
+  mongodb:
+    image: mongo:7-jammy
+    container_name: fitness-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fitness-net
+
+  kafka:
+    image: apache/kafka:4.3.1
+    container_name: fitness-kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    volumes:
+      - kafka_data:/tmp/kraft-combined-logs
+    networks:
+      - fitness-net
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: fitness-keycloak
+    restart: unless-stopped
+    command: start-dev --import-realm
+    ports:
+      - "8080:8080"
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/fitness-app-realm.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080; echo -e 'GET /realms/fitness-app HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; grep -q '200 OK' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+    networks:
+      - fitness-net
+
+  # ============================================================================
+  # SPRING CLOUD CORE
+  # ============================================================================
+  configserver:
+    image: ${REGISTRY_PREFIX:-}fitness-configserver:${IMAGE_TAG:-latest}
+    build:
+      context: ./configserver/configserver
+      dockerfile: Dockerfile
+    container_name: fitness-configserver
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    networks:
+      - fitness-net
+
+  eureka:
+    image: ${REGISTRY_PREFIX:-}fitness-eureka:${IMAGE_TAG:-latest}
+    build:
+      context: ./eureka/eureka
+      dockerfile: Dockerfile
+    container_name: fitness-eureka
+    restart: unless-stopped
+    ports:
+      - "8761:8761"
+    environment:
+      SPRING_CONFIG_IMPORT: optional:configserver:http://configserver:8888
+    depends_on:
+      - configserver
+    networks:
+      - fitness-net
+
+  # ============================================================================
+  # APPLICATION MICROSERVICES
+  # ============================================================================
+  userservice:
+    image: ${REGISTRY_PREFIX:-}fitness-userservice:${IMAGE_TAG:-latest}
+    build:
+      context: ./userservice/userservice
+      dockerfile: Dockerfile
+    container_name: fitness-userservice
+    restart: unless-stopped
+    ports:
+      - "8084:8084"
+    environment:
+      SPRING_CONFIG_IMPORT: optional:configserver:http://configserver:8888
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/fitnessapp
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:-rohith}
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:8761/eureka/
+      EUREKA_INSTANCE_PREFER_IP_ADDRESS: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      configserver:
+        condition: service_started
+      eureka:
+        condition: service_started
+    networks:
+      - fitness-net
+
+  activityservice:
+    image: ${REGISTRY_PREFIX:-}fitness-activityservice:${IMAGE_TAG:-latest}
+    build:
+      context: ./activityservice/activityservice
+      dockerfile: Dockerfile
+    container_name: fitness-activityservice
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_CONFIG_IMPORT: optional:configserver:http://configserver:8888
+      SPRING_DATA_MONGODB_URI: mongodb://mongodb:27017/test
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:8761/eureka/
+      EUREKA_INSTANCE_PREFER_IP_ADDRESS: "true"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      configserver:
+        condition: service_started
+      eureka:
+        condition: service_started
+    networks:
+      - fitness-net
+
+  aiservice:
+    image: ${REGISTRY_PREFIX:-}fitness-aiservice:${IMAGE_TAG:-latest}
+    build:
+      context: ./aiservice/aiservice
+      dockerfile: Dockerfile
+    container_name: fitness-aiservice
+    restart: unless-stopped
+    ports:
+      - "8087:8087"
+    environment:
+      SPRING_CONFIG_IMPORT: optional:configserver:http://configserver:8888
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      GEMINI_URL: ${GEMINI_URL:-https://generativelanguage.googleapis.com/v1beta/interactions}
+      GEMINI_KEY: ${GEMINI_KEY:-demo_key}
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:8761/eureka/
+      EUREKA_INSTANCE_PREFER_IP_ADDRESS: "true"
+    depends_on:
+      kafka:
+        condition: service_started
+      configserver:
+        condition: service_started
+      eureka:
+        condition: service_started
+    networks:
+      - fitness-net
+
+  gateway:
+    image: ${REGISTRY_PREFIX:-}fitness-gateway:${IMAGE_TAG:-latest}
+    build:
+      context: ./gateway/gateway
+      dockerfile: Dockerfile
+    container_name: fitness-gateway
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    environment:
+      SPRING_CONFIG_IMPORT: optional:configserver:http://configserver:8888
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/fitness-app/protocol/openid-connect/certs
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:8761/eureka/
+      EUREKA_INSTANCE_PREFER_IP_ADDRESS: "true"
+    depends_on:
+      eureka:
+        condition: service_started
+      configserver:
+        condition: service_started
+    networks:
+      - fitness-net
+
+  # ============================================================================
+  # FRONTEND (REACT / VITE WITH NGINX)
+  # ============================================================================
+  frontend:
+    image: ${REGISTRY_PREFIX:-}fitness-frontend:${IMAGE_TAG:-latest}
+    build:
+      context: ./fitness-frontend
+      dockerfile: Dockerfile
+    container_name: fitness-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "5173:80"
+    depends_on:
+      - gateway
+      - keycloak
+    networks:
+      - fitness-net
+
+networks:
+  fitness-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  mongo_data:
+  kafka_data:

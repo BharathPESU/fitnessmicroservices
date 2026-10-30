@@ -1,0 +1,35 @@
+# Compiled Java classes and JARs
+**/target/
+*.class
+*.jar
+*.war
+*.ear
+
+# Node & Frontend dependencies and builds
+**/node_modules/
+**/dist/
+**/build/
+.npm
+.eslintcache
+
+# IDE and Editor configurations
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+.project
+.classpath
+.settings/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# Docker / Volume data
+data/
+*.pid
+.env.local
