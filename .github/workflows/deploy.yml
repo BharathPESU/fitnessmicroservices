@@ -196,17 +196,25 @@ jobs:
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
 
-          # Obtain temporary ECR docker login password from AWS in the runner
+          # 1. Determine exact ECR registry URL
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
+          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          echo "Using ECR Registry: $ECR_REGISTRY"
+
+          # 2. Obtain temporary ECR docker login password from AWS in the runner
           ECR_PASSWORD=$(aws ecr get-login-password --region ${{ env.AWS_REGION }})
 
           ssh $SSH_OPTS $TARGET_USER@$TARGET_HOST << EOF
             set -e
             cd ~/fitness-app
 
-            # 1. Log in EC2 Docker daemon to Amazon ECR
+            # Clear any corrupted Docker credentials from previous failed attempts
+            rm -f ~/.docker/config.json
+
+            # Log in EC2 Docker daemon ONLY to Amazon ECR
             echo "$ECR_PASSWORD" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
-            # 2. Write runtime environment variables
+            # Write runtime environment variables
             echo "REGISTRY_PREFIX=${ECR_REGISTRY}/" > .env
             echo "IMAGE_TAG=latest" >> .env
             echo "GEMINI_KEY=${{ secrets.GEMINI_KEY }}" >> .env
@@ -214,10 +222,10 @@ jobs:
             echo "KEYCLOAK_ADMIN=${{ secrets.KEYCLOAK_ADMIN || 'admin' }}" >> .env
             echo "KEYCLOAK_ADMIN_PASSWORD=${{ secrets.KEYCLOAK_ADMIN_PASSWORD || secrets.DB_PASSWORD }}" >> .env
 
-            # 3. Pull latest images from Amazon ECR
+            # Pull latest images from Amazon ECR and Docker Hub cleanly
             docker compose -f docker-compose.prod.yml pull
 
-            # 4. Deploy and start all services
+            # Deploy and start all services
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
             # 5. Clean up old unused images
