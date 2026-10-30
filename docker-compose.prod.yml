@@ -11,7 +11,7 @@ services:
     environment:
       POSTGRES_DB: fitnessapp
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-rohith}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -130,7 +130,7 @@ services:
       SPRING_CONFIG_IMPORT: optional:configserver:http://configserver:8888
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/fitnessapp
       SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:-rohith}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:8761/eureka/
       EUREKA_INSTANCE_PREFER_IP_ADDRESS: "true"
     depends_on:

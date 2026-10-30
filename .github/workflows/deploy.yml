@@ -191,13 +191,13 @@ jobs:
 
             # 2. Write runtime environment variables
             cat << ENVFILE > .env
-          REGISTRY_PREFIX=${ECR_REGISTRY}/
-          IMAGE_TAG=latest
-          GEMINI_KEY=${{ secrets.GEMINI_KEY }}
-          DB_PASSWORD=${{ secrets.DB_PASSWORD || 'rohith' }}
-          KEYCLOAK_ADMIN=admin
-          KEYCLOAK_ADMIN_PASSWORD=admin
-          ENVFILE
+REGISTRY_PREFIX=${ECR_REGISTRY}/
+IMAGE_TAG=latest
+GEMINI_KEY="${{ secrets.GEMINI_KEY }}"
+DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
+KEYCLOAK_ADMIN="${{ secrets.KEYCLOAK_ADMIN || 'admin' }}"
+KEYCLOAK_ADMIN_PASSWORD="${{ secrets.KEYCLOAK_ADMIN_PASSWORD || secrets.DB_PASSWORD }}"
+ENVFILE
 
             # 3. Pull latest images from Amazon ECR
             docker compose -f docker-compose.prod.yml pull
