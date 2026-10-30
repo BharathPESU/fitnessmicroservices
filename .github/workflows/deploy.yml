@@ -17,9 +17,6 @@ jobs:
     name: Build & Push to Amazon ECR
     runs-on: ubuntu-latest
 
-    outputs:
-      ecr_registry: ${{ steps.login-ecr.outputs.registry }}
-
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
@@ -192,11 +189,12 @@ jobs:
         env:
           RAW_HOST: ${{ secrets.EC2_HOST }}
           RAW_USER: ${{ secrets.EC2_USER || 'ubuntu' }}
-          ECR_REGISTRY: ${{ needs.build-and-push-ecr.outputs.ecr_registry }}
         run: |
           TARGET_HOST=$(echo "$RAW_HOST" | sed -e 's|^[^/]*//||' -e 's|/.*$||' | tr -d '[:space:]"')
           TARGET_USER=$(echo "$RAW_USER" | tr -d '[:space:]"')
           SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30"
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
 
           # Obtain temporary ECR docker login password from AWS in the runner
           ECR_PASSWORD=$(aws ecr get-login-password --region ${{ env.AWS_REGION }})
