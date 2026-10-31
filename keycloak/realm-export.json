@@ -719,20 +719,11 @@
       "clientAuthenticatorType": "client-secret",
       "redirectUris": [
         "http://localhost:5173/*",
-        "http://localhost:5173",
-        "https://web1.bharath-enterprize.me/*",
-        "https://web1.bharath-enterprize.me",
-        "http://web1.bharath-enterprize.me/*",
-        "http://web1.bharath-enterprize.me",
-        "http://40.192.58.65/*",
-        "http://40.192.58.65"
+        "http://localhost:5173"
       ],
       "webOrigins": [
         "+",
-        "http://localhost:5173",
-        "https://web1.bharath-enterprize.me",
-        "http://web1.bharath-enterprize.me",
-        "http://40.192.58.65"
+        "http://localhost:5173"
       ],
       "notBefore": 0,
       "bearerOnly": false,

@@ -278,6 +278,32 @@ jobs:
             # Deploy and start all services
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
+            # Configure Keycloak: Disable SSL requirement on master & dynamically register redirect URIs from EC2_HOST
+            echo "Configuring Keycloak dynamic client redirect URIs for host: $TARGET_HOST ..."
+            KC_USER="${{ secrets.KEYCLOAK_ADMIN || 'admin' }}"
+            KC_PASS="${{ secrets.KEYCLOAK_ADMIN_PASSWORD || secrets.DB_PASSWORD }}"
+            TARGET_ORIGIN="http://${TARGET_HOST}:5173"
+
+            for i in {1..25}; do
+              if docker exec fitness-keycloak /opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user "$KC_USER" --password "$KC_PASS" >/dev/null 2>&1; then
+                # 1. Disable SSL requirement on master realm so external HTTP works
+                docker exec fitness-keycloak /opt/keycloak/bin/kcadm.sh update realms/master -s sslRequired=NONE || true
+                echo "Keycloak master realm SSL requirement successfully disabled."
+
+                # 2. Look up the internal client UUID for oauth2-pkce-client and dynamically update origins
+                CLIENT_UUID=\$(docker exec fitness-keycloak /opt/keycloak/bin/kcadm.sh get clients -r fitness-app -q clientId=oauth2-pkce-client --fields id --format csv --noquotes 2>/dev/null | tr -d '[:space:]"')
+                if [ -n "\$CLIENT_UUID" ]; then
+                  docker exec fitness-keycloak /opt/keycloak/bin/kcadm.sh update "clients/\$CLIENT_UUID" -r fitness-app \
+                    -s "redirectUris=[\"$TARGET_ORIGIN/*\", \"$TARGET_ORIGIN\", \"http://localhost:5173/*\", \"http://localhost:5173\"]" \
+                    -s "webOrigins=[\"$TARGET_ORIGIN\", \"+\"]" || true
+                  echo "Successfully registered dynamic redirect URI for oauth2-pkce-client: $TARGET_ORIGIN/*"
+                fi
+                break
+              fi
+              echo "Waiting for Keycloak to finish starting..."
+              sleep 3
+            done
+
             # 5. Clean up old unused images
             docker image prune -f
 
