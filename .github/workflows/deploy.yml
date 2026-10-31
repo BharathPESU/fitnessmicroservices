@@ -285,7 +285,9 @@ jobs:
             TARGET_ORIGIN="http://${TARGET_HOST}:5173"
 
             for i in {1..25}; do
-              if docker exec fitness-keycloak /opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user "$KC_USER" --password "$KC_PASS" >/dev/null 2>&1; then
+              if docker exec fitness-keycloak /opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user "$KC_USER" --password "$KC_PASS" >/dev/null 2>&1 || \
+                 docker exec fitness-keycloak /opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin --password admin >/dev/null 2>&1 || \
+                 docker exec fitness-keycloak /opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin --password "${{ secrets.DB_PASSWORD }}" >/dev/null 2>&1; then
                 # 1. Disable SSL requirement on master realm so external HTTP works
                 docker exec fitness-keycloak /opt/keycloak/bin/kcadm.sh update realms/master -s sslRequired=NONE || true
                 echo "Keycloak master realm SSL requirement successfully disabled."
