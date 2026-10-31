@@ -165,6 +165,54 @@ jobs:
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
+      - name: Ensure Docker & Docker Compose on EC2
+        env:
+          RAW_HOST: ${{ secrets.EC2_HOST }}
+          RAW_USER: ${{ secrets.EC2_USER || 'ubuntu' }}
+        run: |
+          TARGET_HOST=$(echo "$RAW_HOST" | sed -e 's|^[^/]*//||' -e 's|/.*$||' | tr -d '[:space:]"')
+          TARGET_USER=$(echo "$RAW_USER" | tr -d '[:space:]"')
+
+          if [ -z "$TARGET_HOST" ]; then
+            echo "::error::EC2_HOST secret is empty or missing! Please check GitHub Settings -> Secrets and variables -> Actions -> Repository secrets."
+            exit 1
+          fi
+
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30"
+
+          echo "Ensuring Docker and Docker Compose are installed on $TARGET_USER@$TARGET_HOST ..."
+          ssh $SSH_OPTS $TARGET_USER@$TARGET_HOST << 'EOF'
+            set -e
+
+            # Wait for package manager lock if instance recently started
+            while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
+              echo "Waiting for background package manager lock..."
+              sleep 3
+            done
+
+            if ! command -v docker &> /dev/null; then
+              echo ">>> Docker not found on EC2. Installing docker.io..."
+              sudo apt-get update -y
+              sudo apt-get install -y docker.io
+              sudo systemctl enable --now docker
+            else
+              echo ">>> Docker is already installed: $(docker --version)"
+            fi
+
+            if ! docker compose version &> /dev/null; then
+              echo ">>> Docker Compose plugin not found. Installing docker-compose-v2..."
+              sudo apt-get update -y
+              sudo apt-get install -y docker-compose-v2 || sudo apt-get install -y docker-compose-plugin || sudo apt-get install -y docker-compose
+            else
+              echo ">>> Docker Compose is already installed: $(docker compose version)"
+            fi
+
+            # Ensure Docker daemon is active and user has socket access
+            sudo systemctl start docker || true
+            sudo usermod -aG docker $USER || true
+            sudo chmod 666 /var/run/docker.sock || true
+          EOF
+
       - name: Prepare EC2 App Directory & Sync Manifests
         env:
           RAW_HOST: ${{ secrets.EC2_HOST }}
@@ -193,8 +241,6 @@ jobs:
           TARGET_HOST=$(echo "$RAW_HOST" | sed -e 's|^[^/]*//||' -e 's|/.*$||' | tr -d '[:space:]"')
           TARGET_USER=$(echo "$RAW_USER" | tr -d '[:space:]"')
           SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30"
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
 
           # 1. Determine exact ECR registry URL
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
@@ -207,6 +253,9 @@ jobs:
           ssh $SSH_OPTS $TARGET_USER@$TARGET_HOST << EOF
             set -e
             cd ~/fitness-app
+
+            # Ensure docker socket is accessible
+            sudo chmod 666 /var/run/docker.sock 2>/dev/null || true
 
             # Clear any corrupted Docker credentials from previous failed attempts
             rm -f ~/.docker/config.json
