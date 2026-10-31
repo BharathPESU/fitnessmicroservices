@@ -1,10 +1,22 @@
+# ==============================================================================
+# Stage 1: Build the React / Vite Single Page Application
+# ==============================================================================
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+# ==============================================================================
+# Stage 2: Serve static files with Nginx
+# ==============================================================================
 FROM nginx:alpine
 
-# Copy custom Nginx configuration with SPA support
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-# Copy Vite production build
-COPY dist /usr/share/nginx/html
+COPY --from=builder /app/dist /usr/share/nginx/html
 
 EXPOSE 80
 

@@ -218,6 +218,8 @@ services:
         condition: service_started
       configserver:
         condition: service_started
+      keycloak:
+        condition: service_healthy
     networks:
       - fitness-net
 
